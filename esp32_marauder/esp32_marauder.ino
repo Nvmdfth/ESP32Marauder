@@ -14,6 +14,16 @@ https://www.online-utility.org/image/convert/to/XBM
 
 #include <stdio.h>
 
+#if defined(MARAUDER_C5) || defined(XIAO_ESP32_C5)
+  // Workaround for a USB Serial/JTAG + automatic light-sleep interaction on
+  // ESP32-C5: the host loses the device (and it may not come back without a
+  // physical replug) once the chip enters light sleep while a WiFi station
+  // connection is idle. See ESP-IDF's usb-serial-jtag-console docs ("Sleep
+  // Modes" section) for the underlying behaviour.
+  #include "esp_pm.h"
+  #include "esp_wifi.h"
+#endif
+
 #ifdef HAS_GPS
   #include "GpsInterface.h"
 #endif
@@ -236,7 +246,21 @@ uint32_t currentTime  = 0;
 void setup()
 {
   randomSeed(esp_random());
-  
+
+  #if defined(MARAUDER_C5) || defined(XIAO_ESP32_C5)
+    // Disable automatic light-sleep and WiFi modem sleep so the native USB
+    // Serial/JTAG console stays reachable (see the include-site comment
+    // above). esp_pm_configure() is a no-op if CONFIG_PM_ENABLE wasn't
+    // baked into this build's sdkconfig; either call failing is not fatal.
+    esp_pm_config_t pm_cfg = {
+      .max_freq_mhz = 160,
+      .min_freq_mhz = 160,
+      .light_sleep_enable = false
+    };
+    esp_pm_configure(&pm_cfg);
+    esp_wifi_set_ps(WIFI_PS_NONE);
+  #endif
+
   #ifndef DEVELOPER
     esp_log_level_set("*", ESP_LOG_NONE);
   #endif
