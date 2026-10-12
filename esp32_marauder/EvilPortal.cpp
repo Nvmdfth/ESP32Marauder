@@ -35,13 +35,23 @@ void EvilPortal::setup() {
     if (sd_obj.supported) {
       sd_obj.listDirToLinkedList(html_files, "/", "html");
 
-      Serial.println("Evil Portal Found " + (String)html_files->size() + " HTML files");
+      #ifndef MARAUDER_V8
+        Serial.println("Evil Portal Found " + (String)html_files->size() + " HTML files");
+      #endif
     }
   #endif
 }
 
 void EvilPortal::cleanup() {
   this->ap_index = -1;
+
+  // Free the per-activation network resources so repeated Start/Stop cycles don't
+  // leak: stop the DNS server (frees its UDP pcb) and tear down the SoftAP netif +
+  // DHCP lease pool. Previously cleanup() freed only the PSRAM HTML buffer, so each
+  // cycle leaked the DNS socket + AP netif and the web handlers grew unbounded (see
+  // the register-once guard in startAP()).
+  this->dnsServer.stop();
+  WiFi.softAPdisconnect(true);
 
   #ifdef HAS_PSRAM
     free(index_html);
@@ -74,7 +84,9 @@ void EvilPortal::setupServer() {
   #ifndef HAS_PSRAM
     server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request) {
       request->send_P(200, "text/html", index_html);
-      Serial.println(F("client connected"));
+      #ifndef MARAUDER_V8
+        Serial.println(F("client connected"));
+      #endif
       #ifdef HAS_SCREEN
         this->sendToDisplay(F("Client connected to server"));
       #endif
@@ -82,7 +94,9 @@ void EvilPortal::setupServer() {
   #else
     server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request) {
       request->send(200, "text/html", index_html);
-      Serial.println("client connected");
+      #ifndef MARAUDER_V8
+        Serial.println("client connected");
+      #endif
       #ifdef HAS_SCREEN
         this->sendToDisplay(F("Client connected to server"));
       #endif
@@ -195,10 +209,14 @@ void EvilPortal::setHtmlFromSerial(int contentLength) {
 
 bool EvilPortal::setHtml() {
   if (this->using_serial_html) {
-    Serial.println(F("html previously set"));
+    #ifndef MARAUDER_V8
+      Serial.println(F("html previously set"));
+    #endif
     return true;
   }
-  Serial.println(F("Setting HTML..."));
+  #ifndef MARAUDER_V8
+    Serial.println(F("Setting HTML..."));
+  #endif
   #ifdef HAS_SD
     File html_file = sd_obj.getFile("/" + this->target_html_name);
   #else
@@ -209,7 +227,9 @@ bool EvilPortal::setHtml() {
       this->sendToDisplay("Could not find /" + this->target_html_name);
       this->sendToDisplay(F("Touch to exit..."));
     #endif
-    Serial.println("Could not find /" + this->target_html_name + ". Use stopscan...");
+    #ifndef MARAUDER_V8
+      Serial.println("Could not find /" + this->target_html_name + ". Use stopscan...");
+    #endif
     return false;
   }
   else {
@@ -217,7 +237,9 @@ bool EvilPortal::setHtml() {
       #ifdef HAS_SCREEN
         this->sendToDisplay(F("The given HTML is too large. Touch to exit..."));
       #endif
-      Serial.println("The provided HTML is too large.\nUse stopscan...");
+      #ifndef MARAUDER_V8
+        Serial.println("The provided HTML is too large.\nUse stopscan...");
+      #endif
       return false;
     }
     String html = "";
@@ -232,7 +254,9 @@ bool EvilPortal::setHtml() {
     strlcpy(index_html, html.c_str(), MAX_HTML_SIZE);
     index_html[MAX_HTML_SIZE - 1] = '\0';
     this->has_html = true;
-    Serial.println("html set");
+    #ifndef MARAUDER_V8
+      Serial.println("html set");
+    #endif
     html_file.close();
     return true;
   }
@@ -254,82 +278,54 @@ bool EvilPortal::setAP(LinkedList<ssid>* ssids, LinkedList<AccessPoint>* access_
   // If there are no SSIDs and there are no APs selected, pull from file
   // This means the file is last resort
   if ((ssids->size() <= 0) && (temp_ap_name == "")) {
-    #ifdef HAS_SD
-      File ap_config_file = sd_obj.getFile("/ap.config.txt");
-    #else
-      File ap_config_file;
-    #endif
-    // Could not open config file. return false
-    if (!ap_config_file) {
-      #ifdef HAS_SCREEN
-        this->sendToDisplay(F("Could not find /ap.config.txt."));
-        this->sendToDisplay(F("Touch to exit..."));
-      #endif
-      Serial.println(F("Could not find /ap.config.txt. Use stopscan..."));
-      return false;
-    }
-    // Config file good. Proceed
-    else {
-      // ap name too long. return false        
-      if (ap_config_file.size() > MAX_AP_NAME_SIZE) {
-        #ifdef HAS_SCREEN
-          this->sendToDisplay(F("The given AP name is too large. Touch to exit..."));
-        #endif
-        Serial.println("The provided AP name is too large.\nUse stopscan...");
-        return false;
-      }
-      // AP name length good. Read from file into var
-      while (ap_config_file.available()) {
-        char c = ap_config_file.read();
-        Serial.print(c);
-        if (isPrintable(c)) {
-          ap_config.concat(c);
-        }
-      }
-      #ifdef HAS_SCREEN
-        this->sendToDisplay(F("AP name from config file"));
-        this->sendToDisplay("AP name: " + ap_config);
-      #endif
-      Serial.println("AP name from config file: " + ap_config);
-      ap_config_file.close();
-    }
+    return this->setAPFromConfig();
   }
   // There are SSIDs in the list but there could also be an AP selected
   // Priority is SSID list before AP selected and config file
   else if (ssids->size() > 0) {
     ap_config = ssids->get(0).essid;
     if (ap_config.length() > MAX_AP_NAME_SIZE) {
-      #ifdef HAS_SCREEN
+      #if defined(HAS_SCREEN) && !defined(MARAUDER_V8)
         this->sendToDisplay(F("The given AP name is too large. Touch to exit..."));
       #endif
-      Serial.println("The provided AP name is too large.\nUse stopscan...");
+      #ifndef MARAUDER_V8
+        Serial.println("The provided AP name is too large.\nUse stopscan...");
+      #endif
       return false;
     }
-    #ifdef HAS_SCREEN
+    #if defined(HAS_SCREEN) && !defined(MARAUDER_V8)
       this->sendToDisplay(F("AP name from SSID list"));
       this->sendToDisplay("AP name: " + ap_config);
     #endif
-    Serial.println("AP name from SSID list: " + ap_config);
+    #ifndef MARAUDER_V8
+      Serial.println("AP name from SSID list: " + ap_config);
+    #endif
   }
   else if (temp_ap_name != "") {
     if (temp_ap_name.length() > MAX_AP_NAME_SIZE) {
-      #ifdef HAS_SCREEN
+      #if defined(HAS_SCREEN) && !defined(MARAUDER_V8)
         this->sendToDisplay(F("The given AP name is too large. Touch to exit..."));
       #endif
-      Serial.println("The given AP name is too large.\nUse stopscan...");
+      #ifndef MARAUDER_V8
+        Serial.println("The given AP name is too large.\nUse stopscan...");
+      #endif
     }
     else {
       ap_config = temp_ap_name;
-      #ifdef HAS_SCREEN
+      #if defined(HAS_SCREEN) && !defined(MARAUDER_V8)
         this->sendToDisplay(F("AP name from AP list"));
         this->sendToDisplay("AP name: " + ap_config);
       #endif
-      Serial.println("AP name from AP list: " + ap_config);
+      #ifndef MARAUDER_V8
+        Serial.println("AP name from AP list: " + ap_config);
+      #endif
     }
   }
   else {
-    Serial.println(F("Could not configure Access Point. Use stopscan..."));
-    #ifdef HAS_SCREEN
+    #ifndef MARAUDER_V8
+      Serial.println(F("Could not configure Access Point. Use stopscan..."));
+    #endif
+    #if defined(HAS_SCREEN) && !defined(MARAUDER_V8)
       this->sendToDisplay(F("Could not configure Access Point.\nTouch to exit..."));
     #endif
   }
@@ -337,13 +333,39 @@ bool EvilPortal::setAP(LinkedList<ssid>* ssids, LinkedList<AccessPoint>* access_
   if (ap_config != "") {
     strncpy(apName, ap_config.c_str(), MAX_AP_NAME_SIZE);
     this->has_ap = true;
-    Serial.println(F("ap config set"));
+    #ifndef MARAUDER_V8
+      Serial.println(F("ap config set"));
+    #endif
     this->ap_index = targ_ap_index;
     return true;
   }
   else
     return false;
 
+}
+
+bool EvilPortal::setAPFromConfig() {
+  #ifdef HAS_SD
+    File ap_config_file = sd_obj.getFile("/ap.config.txt");
+  #else
+    File ap_config_file;
+  #endif
+
+  if (!ap_config_file || ap_config_file.size() > MAX_AP_NAME_SIZE) {
+    if (ap_config_file)
+      ap_config_file.close();
+    return false;
+  }
+
+  String ap_config = ap_config_file.readString();
+  ap_config_file.close();
+
+  if (this->setAP(ap_config)) {
+    this->ap_index = -1;
+    return true;
+  }
+
+  return false;
 }
 
 bool EvilPortal::setAP(String essid) {
@@ -354,9 +376,12 @@ bool EvilPortal::setAP(String essid) {
     return false;
   }
 
-  strncpy(apName, essid.c_str(), MAX_AP_NAME_SIZE);
+  strncpy(apName, essid.c_str(), MAX_AP_NAME_SIZE - 1);
+  apName[MAX_AP_NAME_SIZE - 1] = '\0';
   this->has_ap = true;
-  Serial.println(F("ap config set"));
+  #ifndef MARAUDER_V8
+    Serial.println(F("ap config set"));
+  #endif
   return true;
 }
 
@@ -367,24 +392,29 @@ void EvilPortal::startAP() {
   WiFi.softAPConfig(AP_IP, AP_IP, IPAddress(255, 255, 255, 0));
   WiFi.softAP(apName);
 
-  Serial.print(F("ap ip address: "));
-  Serial.println(WiFi.softAPIP());
+  #ifndef MARAUDER_V8
+    Serial.print(F("ap ip address: "));
+    Serial.println(WiFi.softAPIP());
+  #endif
 
-  // Start each run from a clean server: stop any previous listener and free the
-  // handlers/CaptiveRequestHandler from an earlier start. Without this, every
-  // `evilportal -c start` re-ran setupServer() + addHandler(new ...) + begin(),
-  // piling up duplicate handlers and leaking a CaptiveRequestHandler each cycle
-  // until the async server could no longer build a response (blank page /
-  // ERR_EMPTY_RESPONSE after the first run).
-  server.end();
-  server.reset();
-
-  this->setupServer();
+  // Register the web-server endpoints + captive handler ONCE for the app lifetime.
+  // setupServer() appends ~12 handlers and addHandler() allocates a
+  // CaptiveRequestHandler; re-running them on every Start leaked those per activation
+  // (server._handlers grew unbounded). They are owned by the global `server` and this
+  // is the singleton evil_portal_obj, so once is enough; server.begin() is idempotent.
+  // The AP + DNS themselves ARE rebuilt each Start (cleanup() tears them down).
+  static bool s_server_registered = false;
+  if (!s_server_registered) {
+    this->setupServer();
+    server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER);
+    server.begin();
+    s_server_registered = true;
+  }
 
   this->dnsServer.start(53, "*", WiFi.softAPIP());
-  server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER);
-  server.begin();
-  Serial.println(F("Evil Portal READY"));
+  #ifndef MARAUDER_V8
+    Serial.println(F("Evil Portal READY"));
+  #endif
   #ifdef HAS_SCREEN
     this->sendToDisplay(F("Evil Portal READY"));
   #endif
@@ -407,7 +437,7 @@ void EvilPortal::sendToDisplay(String msg) {
       display_string.concat(" ");
     }
     display_obj.loading = true;
-    display_obj.display_buffer->add(display_string);
+    display_obj.queueLine(display_string);
     display_obj.loading = false;
   #endif
 }

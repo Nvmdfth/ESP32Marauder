@@ -27,17 +27,22 @@ https://www.online-utility.org/image/convert/to/XBM
 
 #ifdef HAS_FLIPPER_LED
   #include "flipperLED.h"
-#elif defined(XIAO_ESP32_S3)
+#elif defined(XIAO_ESP32_S3) || defined(XIAO_ESP32_C5)
   #include "xiaoLED.h"
 #elif defined(MARAUDER_M5STICKC) || defined(MARAUDER_M5STICKCP2)
   #include "stickcLED.h"
-#elif defined(HAS_NEOPIXEL_LED)
+#elif defined(HAS_NEOPIXEL_LED) || defined(HAS_T_DONGLE_LED)
   #include "LedInterface.h"
 #endif
 
 #include "settings.h"
 #include "CommandLine.h"
+#include "ReconMission.h"
 #include "lang_var.h"
+
+#ifdef HAS_T_DONGLE_DISPLAY
+  #include "TDongleDisplay.h"
+#endif
 
 #ifdef HAS_BATTERY
   #include "BatteryInterface.h"
@@ -66,6 +71,9 @@ https://www.online-utility.org/image/convert/to/XBM
   #if (C_BTN >= 0)
     Switches c_btn = Switches(C_BTN, 1000, C_PULL);
   #endif
+  #if defined(MARAUDER_POOM) && (B_BTN >= 0)
+    Switches b_btn = Switches(B_BTN, 1000, B_PULL);
+  #endif
 
 #endif
 
@@ -74,6 +82,11 @@ EvilPortal evil_portal_obj;
 Buffer buffer_obj;
 Settings settings_obj;
 CommandLine cli_obj;
+ReconMission recon_obj;
+
+#ifdef HAS_T_DONGLE_DISPLAY
+  TDongleDisplay t_dongle_display;
+#endif
 
 #ifdef HAS_GPS
   GpsInterface gps_obj;
@@ -94,18 +107,22 @@ CommandLine cli_obj;
 
 #ifdef HAS_FLIPPER_LED
   flipperLED flipper_led;
-#elif defined(XIAO_ESP32_S3)
+#elif defined(XIAO_ESP32_S3) || defined(XIAO_ESP32_C5)
   xiaoLED xiao_led;
 #elif defined(MARAUDER_M5STICKC) || defined(MARAUDER_M5STICKCP2)
   stickcLED stickc_led;
-#elif defined(HAS_NEOPIXEL_LED)
+#elif defined(HAS_NEOPIXEL_LED) || defined(HAS_T_DONGLE_LED)
   LedInterface led_obj;
 #endif
 
 const String PROGMEM version_number = MARAUDER_VERSION;
 
 #ifdef HAS_NEOPIXEL_LED
-  Adafruit_NeoPixel strip = Adafruit_NeoPixel(Pixels, PIN, NEO_GRB + NEO_KHZ800);
+  #ifdef MARAUDER_POOM
+    PoomWs2812 strip(Pixels, PIN);
+  #else
+    Adafruit_NeoPixel strip = Adafruit_NeoPixel(Pixels, PIN, NEO_GRB + NEO_KHZ800);
+  #endif
 #endif
 
 uint32_t currentTime  = 0;
@@ -194,9 +211,7 @@ uint32_t currentTime  = 0;
     #ifdef HAS_SCREEN
       #if defined(MARAUDER_MINI) || defined(MARAUDER_MINI_V3)
         digitalWrite(TFT_BL, LOW);
-      #endif
-    
-      #if !defined(MARAUDER_MINI) && !defined(MARAUDER_MINI_V3)
+      #elif !defined(MARAUDER_POOM)
         digitalWrite(TFT_BL, HIGH);
       #endif
     #endif
@@ -206,9 +221,7 @@ uint32_t currentTime  = 0;
     #ifdef HAS_SCREEN
       #if defined(MARAUDER_MINI) || defined(MARAUDER_MINI_V3)
         digitalWrite(TFT_BL, HIGH);
-      #endif
-    
-      #if !defined(MARAUDER_MINI) && !defined(MARAUDER_MINI_V3)
+      #elif !defined(MARAUDER_POOM)
         digitalWrite(TFT_BL, LOW);
       #endif
     #endif
@@ -228,10 +241,6 @@ void setup()
     esp_log_level_set("*", ESP_LOG_NONE);
   #endif
   
-  #ifndef HAS_IDF_3
-    esp_spiram_init();
-  #endif
-
   Serial.begin(115200);
 
   #ifdef HAS_ACT_LED
@@ -253,7 +262,7 @@ void setup()
     digitalWrite(POWER_HOLD_PIN, HIGH);
   #endif
   
-  #ifdef HAS_SCREEN
+  #if defined(HAS_SCREEN) && !defined(MARAUDER_POOM)
     pinMode(TFT_BL, OUTPUT);
   #endif
   
@@ -264,7 +273,7 @@ void setup()
   #endif
   
   // Preset SPI CS pins to avoid bus conflicts
-  #ifdef HAS_SCREEN
+  #if defined(HAS_SCREEN) && !defined(MARAUDER_POOM)
     digitalWrite(TFT_CS, HIGH);
   #endif
   
@@ -312,15 +321,7 @@ void setup()
   #endif
 
   #ifdef HAS_SCREEN
-    #if !defined(MARAUDER_CARDPUTER) && !defined(MARAUDER_CARDPUTER_ADV)
-      display_obj.tft.drawCentreString("ESP32 Marauder", TFT_WIDTH/2, TFT_HEIGHT * 0.33, 1);
-      display_obj.tft.drawCentreString("JustCallMeKoko", TFT_WIDTH/2, TFT_HEIGHT * 0.5, 1);
-      display_obj.tft.drawCentreString(display_obj.version_number, TFT_WIDTH/2, TFT_HEIGHT * 0.66, 1);
-    #else
-      display_obj.tft.drawCentreString("ESP32 Marauder", TFT_HEIGHT/2, TFT_WIDTH * 0.33, 1);
-      display_obj.tft.drawCentreString("JustCallMeKoko", TFT_HEIGHT/2, TFT_WIDTH * 0.5, 1);
-      display_obj.tft.drawCentreString(display_obj.version_number, TFT_HEIGHT/2, TFT_WIDTH * 0.66, 1);
-    #endif
+    display_obj.drawBootSplash();
   #endif
 
 
@@ -339,7 +340,7 @@ void setup()
 
   settings_obj.begin();
 
-  const char* type = settings_obj.getSettingType("ChanHop");
+  const char* type = settings_obj.getSettingType("wu");
 
   if (type == nullptr || type[0] == '\0') {
     Serial.println(F("Current settings format not supported. Installing new default settings..."));
@@ -359,9 +360,8 @@ void setup()
 
   wifi_scan_obj.RunSetup();
 
-  #ifdef HAS_SCREEN
-    display_obj.tft.setTextColor(TFT_GREEN, TFT_BLACK);
-    display_obj.tft.drawCentreString("Initializing...", TFT_WIDTH/2, TFT_HEIGHT * 0.82, 1);
+  #ifdef HAS_T_DONGLE_DISPLAY
+    t_dongle_display.begin();
   #endif
 
   evil_portal_obj.setup();
@@ -377,11 +377,11 @@ void setup()
   // Do some LED stuff
   #ifdef HAS_FLIPPER_LED
     flipper_led.RunSetup();
-  #elif defined(XIAO_ESP32_S3)
+  #elif defined(XIAO_ESP32_S3) || defined(XIAO_ESP32_C5)
     xiao_led.RunSetup();
   #elif defined(MARAUDER_M5STICKC)
     stickc_led.RunSetup();
-  #elif defined(HAS_NEOPIXEL_LED)
+  #elif defined(HAS_NEOPIXEL_LED) || defined(HAS_T_DONGLE_LED)
     led_obj.RunSetup();
   #endif
 
@@ -446,6 +446,11 @@ void loop()
   // Update all of our objects
   cli_obj.main(currentTime);
   wifi_scan_obj.main(currentTime);
+  recon_obj.main(currentTime);
+
+  #ifdef HAS_T_DONGLE_DISPLAY
+    t_dongle_display.update(currentTime, wifi_scan_obj);
+  #endif
 
   #ifdef HAS_GPS
     gps_obj.main();
@@ -465,12 +470,20 @@ void loop()
   }
   #ifdef HAS_FLIPPER_LED
     flipper_led.main();
-  #elif defined(XIAO_ESP32_S3)
+  #elif defined(XIAO_ESP32_S3) || defined(XIAO_ESP32_C5)
     xiao_led.main();
   #elif defined(MARAUDER_M5STICKC)
     stickc_led.main();
+  #elif defined(HAS_T_DONGLE_LED)
+    // The LED shares GPIO2/GPIO7 with the display/SD bus. Always make it the
+    // final writer so later SPI activity cannot leave it latched white.
+    led_obj.refresh();
   #elif defined(HAS_NEOPIXEL_LED)
     led_obj.main(currentTime);
+  #endif
+
+  #ifdef MARAUDER_POOM
+    display_obj.tft.display();
   #endif
 
   #ifdef HAS_SCREEN

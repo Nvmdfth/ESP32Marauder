@@ -26,6 +26,7 @@ class Buffer {
     void append(String log);
     void save();
     String getFileName();
+    void setDirectory(const char* path);
   private:
     void createFile(const char* name, bool is_pcap, bool is_gpx = false);
     void open(bool is_pcap);
@@ -56,6 +57,7 @@ class Buffer {
     volatile uint32_t dropped = 0;     // packets dropped because the ring was full
 
     String fileName = "/0.pcap";
+    const char* directory = NULL;
     File file;
     fs::FS* fs;
     bool serial;

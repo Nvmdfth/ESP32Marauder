@@ -13,11 +13,30 @@
 #include <SPI.h>
 #include "SPIFFS.h"
 #include "Assets.h"
+#include "BootSplash.h"
+#include "MemoryGuard.h"
 
-#include <TFT_eSPI.h>
+#ifdef MARAUDER_POOM
+  #include "PoomDisplay.h"
+#else
+  #include <TFT_eSPI.h>
+#endif
+
+// Reject board/display configuration mismatches at compile time. A mismatched
+// TFT setup can boot normally while driving the wrong controller and pins.
+#if defined(MARAUDER_CYD_3_5_INCH) && !defined(ST7796_DRIVER)
+  #error "MARAUDER_CYD_3_5_INCH requires User_Setup_cyd_3_5_inch.h (ST7796_DRIVER)"
+#endif
+#if (defined(MARAUDER_CARDPUTER) || defined(MARAUDER_CARDPUTER_ADV)) && !defined(ST7789_2_DRIVER)
+  #error "Cardputer targets require their ST7789_2_DRIVER TFT_eSPI setup"
+#endif
 
 #ifdef HAS_CYD_TOUCH
   #include <XPT2046_Touchscreen.h>
+#endif
+
+#ifdef HAS_CAP_TOUCH
+  #include "ft6336.h"
 #endif
 
 // WiFi stuff
@@ -97,6 +116,8 @@ class Display
     bool draw_tft = false;
     bool exit_draw = false;
     bool headless_mode = false;
+    marauder::QueueBackpressureState display_queue_pressure{
+        DISPLAY_BUFFER_LIMIT};
 
     uint8_t TOP_FIXED_AREA_2 = 48;
     uint8_t print_delay_1, print_delay_2 = 10;
@@ -137,11 +158,13 @@ class Display
     void tftDrawChanHopButton(bool lnd_an = true, bool en = false);
     void buildBanner(String msg, int xpos);
     void clearScreen();
+    bool queueLine(const String& line);
     void displayBuffer(bool do_clear = false);
+    void drawBootSplash();
     void getTouchWhileFunction(bool pressed);
     void init();
     void RunSetup();
-    void showCenterText(const char* text, int y, bool small_pp = false);
+    void showCenterText(const char* text, int y, bool small_pp = false, uint8_t text_size = BANNER_TEXT_SIZE);
     void touchToExit();
     void twoPartDisplay(String center_text);
     void updateBanner(String msg);
