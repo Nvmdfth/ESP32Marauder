@@ -69,7 +69,7 @@
   // the maximum the classic ESP32 radio supports; asking for more (the old
   // hard-coded 20) makes NimBLE 2.x's setPower() fail and print
   // "Failed to set NimBLE output power" on every spam iteration.
-  #define BLE_TX_POWER_DBM 9
+  #define BLE_TX_POWER_DBM 20
 
   #define GRAPH_REFRESH   100
 
